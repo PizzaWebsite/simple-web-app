@@ -75,7 +75,11 @@
       border: 0;
       display: block;
     }
+      /* Map container for Leaflet (GPX import) */
+    .leaflet-map { width: min(92vw, 520px); height: clamp(260px, 45vh, 420px); border: 0; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); margin-top: 12px; }
   </style>
+  <!-- Leaflet CSS for GPX route rendering -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-o9N1j7kGZ8J3gWDGm1s2+3QdIh1gC4hYQv8aT6x5s3E=" crossorigin="anonymous" />
 </head>
 <body>
   <!-- Card 1: Heading toggle -->
@@ -96,6 +100,17 @@
     <div class="map-wrap">
       <iframe id="map" class="map" title="Your map" loading="lazy" hidden></iframe>
     </div>
+  </section>
+
+  <!-- Card 3: Import a walking/running route (GPX) -->
+  <section class="card" id="route-card">
+    <h2>Import a route (GPX)</h2>
+    <p class="mono" id="gpx-status">Choose a .gpx file exported from MapMyWalk / MapMyRun.</p>
+    <div class="row" style="justify-content:center; gap:8px;">
+      <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml" />
+    </div>
+    <div id="route-map" class="leaflet-map" aria-label="Route map" hidden></div>
+    <p style="font-size:12px;opacity:.8;margin-top:8px">Tip: On the MapMy website you can export a route as GPX, then load it here. No API key needed.</p>
   </section>
 
   <script>
@@ -159,6 +174,81 @@
         showMap(lat, lng);
       });
     })();
+    </script>
+  <!-- Leaflet JS for GPX route rendering -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-QV1M8zR2kL8Z9gQ1zYwZ1+VxgQqzGmZfM0zCwQnYg8E=" crossorigin="anonymous"></script>
+  <script>
+    // Card 3 behavior: GPX import & render with Leaflet (no API key)
+    (function () {
+      const fileInput = document.getElementById('gpx-file');
+      const statusEl = document.getElementById('gpx-status');
+      const mapDiv = document.getElementById('route-map');
+      let map, polyline;
+
+      function setStatus(msg) { statusEl.textContent = msg; }
+
+      function ensureMap() {
+        if (map) return map;
+        mapDiv.hidden = false;
+        map = L.map('route-map');
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+        // Default view (world) until we load coordinates
+        map.setView([20, 0], 2);
+        return map;
+      }
+
+      function parseGPX(xmlText) {
+        const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+        // Prefer track points <trkpt>, fallback to route points <rtept>
+        let pts = Array.from(doc.querySelectorAll('trkpt')).map(pt => [
+          parseFloat(pt.getAttribute('lat')),
+          parseFloat(pt.getAttribute('lon')),
+        ]);
+        if (pts.length === 0) {
+          pts = Array.from(doc.querySelectorAll('rtept')).map(pt => [
+            parseFloat(pt.getAttribute('lat')),
+            parseFloat(pt.getAttribute('lon')),
+          ]);
+        }
+        // Filter bad values
+        pts = pts.filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
+        return pts;
+      }
+
+      function drawRoute(latlngs) {
+        const m = ensureMap();
+        if (polyline) { polyline.remove(); }
+        polyline = L.polyline(latlngs, { weight: 5, opacity: 0.9 });
+        polyline.addTo(m);
+        m.fitBounds(polyline.getBounds(), { padding: [20, 20] });
+      }
+
+      fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (!/\.gpx$/i.test(file.name)) {
+          setStatus('Please select a .gpx file.');
+          return;
+        }
+        setStatus('Reading GPX…');
+        try {
+          const text = await file.text();
+          const latlngs = parseGPX(text);
+          if (!latlngs.length) {
+            setStatus('No route points found in this GPX.');
+            return;
+          }
+          drawRoute(latlngs);
+          setStatus('Route loaded.');
+        } catch (err) {
+          console.error(err);
+          setStatus('Failed to read GPX file.');
+        }
+      });
+    })();
   </script>
 </body>
 </html>
+
