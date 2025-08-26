@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>Simple Web App</title>
+  <style>
+    :root {
+      --bg-1: cornsilk;
+      --bg-2: #cfe8ff;
+      --text: #0b1220;
+      --card-bg: rgba(255, 255, 255, 0.6);
+      --btn-bg: #ffd84d;
+      --btn-bg-hover: #ffcd1a;
+      --btn-text: #1f1400;
+      --shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+      --radius: 20px;
+      --gap: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color: var(--text);
+      background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--gap);
+      padding: 24px 16px;
+      min-height: 100dvh;
+    }
+
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      padding: 32px 24px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      text-align: center;
+      max-width: 560px;
+      width: min(92vw, 560px);
+    }
+
+    h1, h2 { margin: 0 0 16px 0; line-height: 1.15; letter-spacing: 0.3px; }
+    h1 { font-size: clamp(28px, 5vw, 44px); }
+    h2 { font-size: clamp(18px, 4vw, 28px); }
+    p { margin: 8px 0; }
+
+    button {
+      border: 0;
+      border-radius: calc(var(--radius) - 8px);
+      background: var(--btn-bg);
+      color: var(--btn-text);
+      font-weight: 700;
+      font-size: 16px;
+      padding: 12px 20px;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+      transition: background-color 120ms ease;
+    }
+    button:hover { background: var(--btn-bg-hover); }
+
+    .row { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 14px; }
+
+    .map-wrap { margin-top: 12px; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); }
+    iframe.map {
+      width: min(92vw, 520px);
+      height: clamp(220px, 40vh, 380px);
+      border: 0;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <!-- Card 1: Heading toggle -->
+  <main class="card" role="main">
+    <h1 id="headline">simple web app</h1>
+    <button id="press" type="button">press me</button>
+  </main>
+
+  <!-- Card 2: Geolocation + Google Maps embed -->
+  <section class="card" id="geo-card">
+    <h2>Find my location</h2>
+    <p id="geo-status">Click a button to show a map.</p>
+    <div class="row">
+      <button id="locate" type="button">Use GPS</button>
+      <button id="demo" type="button">Demo Location</button>
+    </div>
+    <p class="mono" id="coords"></p>
+    <div class="map-wrap">
+      <iframe id="map" class="map" title="Your map" loading="lazy" hidden></iframe>
+    </div>
+  </section>
+
+  <script>
+    // Card 1 behavior
+    (function () {
+      const headline = document.getElementById('headline');
+      const button = document.getElementById('press');
+      let changed = false;
+      button.addEventListener('click', () => {
+        headline.textContent = changed ? 'simple web app' : 'hello whirled';
+        changed = !changed;
+      });
+    })();
+
+    // Card 2 behavior
+    (function () {
+      const btnGPS = document.getElementById('locate');
+      const btnDemo = document.getElementById('demo');
+      const statusEl = document.getElementById('geo-status');
+      const coordsEl = document.getElementById('coords');
+      const mapEl = document.getElementById('map');
+
+      function setStatus(msg) { statusEl.textContent = msg; }
+
+      function showMap(lat, lng, zoom = 15) {
+        const q = `${lat},${lng}`;
+        mapEl.src = `https://www.google.com/maps?q=${encodeURIComponent(q)}&z=${zoom}&output=embed`;
+        mapEl.hidden = false;
+      }
+
+      function onSuccess(pos) {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setStatus('Location found.');
+        coordsEl.textContent = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)} m)`;
+        showMap(latitude, longitude);
+      }
+
+      function onError(err) {
+        setStatus('GPS error: ' + err.message);
+      }
+
+      btnGPS.addEventListener('click', () => {
+        if (!('geolocation' in navigator)) {
+          setStatus('Geolocation not supported.');
+          return;
+        }
+        setStatus('Requesting GPS location…');
+        navigator.geolocation.getCurrentPosition(onSuccess, onError, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        });
+      });
+
+      // Demo fallback button with hardcoded coordinates (e.g., New York City)
+      btnDemo.addEventListener('click', () => {
+        const lat = 40.7128;
+        const lng = -74.0060;
+        setStatus('Showing demo location (NYC).');
+        coordsEl.textContent = `${lat}, ${lng}`;
+        showMap(lat, lng);
+      });
+    })();
+  </script>
+</body>
+</html>
