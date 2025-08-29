@@ -51,35 +51,32 @@
     h2 { font-size: clamp(18px, 4vw, 28px); }
     p { margin: 8px 0; }
 
-    button {
+    button, input[type="file"], label {
       border: 0;
       border-radius: calc(var(--radius) - 8px);
       background: var(--btn-bg);
       color: var(--btn-text);
       font-weight: 700;
-      font-size: 16px;
-      padding: 12px 20px;
+      font-size: 15px;
+      padding: 10px 14px;
       cursor: pointer;
       box-shadow: var(--shadow);
       transition: background-color 120ms ease;
     }
-    button:hover { background: var(--btn-bg-hover); }
+    button:hover, label:hover { background: var(--btn-bg-hover); }
 
-    .row { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+    input[type="file"] { background: white; color: #333; font-weight: 500; }
+
+    .row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 14px; }
 
-    .map-wrap { margin-top: 12px; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); }
-    iframe.map {
-      width: min(92vw, 520px);
-      height: clamp(220px, 40vh, 380px);
-      border: 0;
-      display: block;
-    }
-      /* Map container for Leaflet (GPX import) */
-    .leaflet-map { width: min(92vw, 520px); height: clamp(260px, 45vh, 420px); border: 0; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); margin-top: 12px; }
+    /* Google Map container */
+    #gmap { width: min(92vw, 520px); height: clamp(300px, 50vh, 460px); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); margin-top: 12px; }
+
+    details.cost-guard { text-align: left; margin-top: 10px; }
+    details.cost-guard summary { cursor: pointer; font-weight: 700; }
+    details.cost-guard ul { margin: 6px 0 0 18px; }
   </style>
-  <!-- Leaflet CSS for GPX route rendering -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-o9N1j7kGZ8J3gWDGm1s2+3QdIh1gC4hYQv8aT6x5s3E=" crossorigin="anonymous" />
 </head>
 <body>
   <!-- Card 1: Heading toggle -->
@@ -88,29 +85,35 @@
     <button id="press" type="button">press me</button>
   </main>
 
-  <!-- Card 2: Geolocation + Google Maps embed -->
-  <section class="card" id="geo-card">
-    <h2>Find my location</h2>
-    <p id="geo-status">Click a button to show a map.</p>
+  <!-- Card 2: Google Map (unified: live GPS tracking + GPX route) -->
+  <section class="card" id="gmap-card" aria-live="polite">
+    <h2>Map (Google) — Route + Live Tracking</h2>
+    <p id="map-status">Add your Google Maps API key in the script URL, then use GPS or import a .gpx route.</p>
     <div class="row">
-      <button id="locate" type="button">Use GPS</button>
-      <button id="demo" type="button">Demo Location</button>
-    </div>
-    <p class="mono" id="coords"></p>
-    <div class="map-wrap">
-      <iframe id="map" class="map" title="Your map" loading="lazy" hidden></iframe>
-    </div>
-  </section>
-
-  <!-- Card 3: Import a walking/running route (GPX) -->
-  <section class="card" id="route-card">
-    <h2>Import a route (GPX)</h2>
-    <p class="mono" id="gpx-status">Choose a .gpx file exported from MapMyWalk / MapMyRun.</p>
-    <div class="row" style="justify-content:center; gap:8px;">
+      <button id="gm-locate" type="button" aria-describedby="map-status">One-time GPS</button>
+      <button id="gm-track" type="button">Start Tracking</button>
+      <button id="gm-stop" type="button" disabled>Stop</button>
+      <label style="display:inline-flex;align-items:center;gap:8px;background:white;color:#222;padding:8px 12px;">
+        <input id="gm-follow" type="checkbox" checked style="accent-color:#1a73e8; box-shadow:none; width:auto; height:auto;" />
+        Follow Me
+      </label>
       <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml" />
+      <button id="gm-clear" type="button">Clear</button>
     </div>
-    <div id="route-map" class="leaflet-map" aria-label="Route map" hidden></div>
-    <p style="font-size:12px;opacity:.8;margin-top:8px">Tip: On the MapMy website you can export a route as GPX, then load it here. No API key needed.</p>
+    <p class="mono" id="gm-coords"></p>
+    <p class="mono" id="gm-metrics"></p>
+    <div id="gmap" aria-label="Interactive map"></div>
+
+    <details class="cost-guard">
+      <summary>Cost guard (keep it free)</summary>
+      <ul>
+        <li><strong>Lazy init:</strong> the map <em>does not load</em> until you click a button (so no tile load if you never use it).</li>
+        <li><strong>One map instance:</strong> we reuse a single map and avoid reloading the API.</li>
+        <li><strong>Only Maps JS + geometry:</strong> no Places/Routes/paid geolocation calls.</li>
+        <li><strong>Key restricted:</strong> lock your key to your Pages domain and the Maps JavaScript API only.</li>
+        <li><strong>Quotas & budgets:</strong> set tiny daily caps and a $0 budget alert in Google Cloud.</li>
+      </ul>
+    </details>
   </section>
 
   <script>
@@ -124,131 +127,210 @@
         changed = !changed;
       });
     })();
+  </script>
 
-    // Card 2 behavior
-    (function () {
-      const btnGPS = document.getElementById('locate');
-      const btnDemo = document.getElementById('demo');
-      const statusEl = document.getElementById('geo-status');
-      const coordsEl = document.getElementById('coords');
-      const mapEl = document.getElementById('map');
+  <!-- Load Google Maps JS API (replace AIzaSyBmdlqxBZyGXL_0MgK6RHHD0-P-64UbCZ8). Include geometry library for distances. -->
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmdlqxBZyGXL_0MgK6RHHD0-P-64UbCZ8&v=weekly&libraries=geometry&callback=initMap"></script>
 
-      function setStatus(msg) { statusEl.textContent = msg; }
-
-      function showMap(lat, lng, zoom = 15) {
-        const q = `${lat},${lng}`;
-        mapEl.src = `https://www.google.com/maps?q=${encodeURIComponent(q)}&z=${zoom}&output=embed`;
-        mapEl.hidden = false;
-      }
-
-      function onSuccess(pos) {
-        const { latitude, longitude, accuracy } = pos.coords;
-        setStatus('Location found.');
-        coordsEl.textContent = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)} m)`;
-        showMap(latitude, longitude);
-      }
-
-      function onError(err) {
-        setStatus('GPS error: ' + err.message);
-      }
-
-      btnGPS.addEventListener('click', () => {
-        if (!('geolocation' in navigator)) {
-          setStatus('Geolocation not supported.');
-          return;
-        }
-        setStatus('Requesting GPS location…');
-        navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
-        });
-      });
-
-      // Demo fallback button with hardcoded coordinates (e.g., New York City)
-      btnDemo.addEventListener('click', () => {
-        const lat = 40.7128;
-        const lng = -74.0060;
-        setStatus('Showing demo location (NYC).');
-        coordsEl.textContent = `${lat}, ${lng}`;
-        showMap(lat, lng);
-      });
-    })();
-    </script>
-  <!-- Leaflet JS for GPX route rendering -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-QV1M8zR2kL8Z9gQ1zYwZ1+VxgQqzGmZfM0zCwQnYg8E=" crossorigin="anonymous"></script>
   <script>
-    // Card 3 behavior: GPX import & render with Leaflet (no API key)
-    (function () {
-      const fileInput = document.getElementById('gpx-file');
-      const statusEl = document.getElementById('gpx-status');
-      const mapDiv = document.getElementById('route-map');
-      let map, polyline;
+    // Card 2: One Google Map that supports current position, LIVE tracking, and GPX route polyline
+    // Cost guard: Lazy-init map only after first interaction; prevent duplicate init across hot reloads.
+    let map, userMarker, accuracyCircle, routePolyline, trackingPolyline, watchId = null;
+    let routePts = []; // GPX points
+    let trackingPts = []; // live points
 
-      function setStatus(msg) { statusEl.textContent = msg; }
+    function ensureMap() {
+      if (map) return map;
+      const mapDiv = document.getElementById('gmap');
+      // Default center (continental US)
+      map = new google.maps.Map(mapDiv, {
+        center: { lat: 39.8283, lng: -98.5795 },
+        zoom: 4,
+        mapId: 'DEMO_MAP_ID'
+      });
+      return map;
+    }
 
-      function ensureMap() {
-        if (map) return map;
-        mapDiv.hidden = false;
-        map = L.map('route-map');
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
-        // Default view (world) until we load coordinates
-        map.setView([20, 0], 2);
-        return map;
+    function initMap() {
+      if (window.__gmInitDone) return; // cost guard: avoid duplicate binding
+      window.__gmInitDone = true;
+
+      const statusEl = document.getElementById('map-status');
+      const coordsEl = document.getElementById('gm-coords');
+      const metricsEl = document.getElementById('gm-metrics');
+      const btnLocate = document.getElementById('gm-locate');
+      const btnTrack = document.getElementById('gm-track');
+      const btnStop = document.getElementById('gm-stop');
+      const btnClear = document.getElementById('gm-clear');
+      const chkFollow = document.getElementById('gm-follow');
+
+      // Let user know we won't load tiles until interaction
+      statusEl.textContent = 'Google Maps API ready — map will load after your first action.';
+
+      const fitAll = () => {
+        if (!map) return; // nothing to fit yet
+        const bounds = new google.maps.LatLngBounds();
+        let hasThing = false;
+        if (routePolyline && routePolyline.getPath().getLength()) { routePolyline.getPath().forEach(latlng => bounds.extend(latlng)); hasThing = true; }
+        if (trackingPolyline && trackingPolyline.getPath().getLength()) { trackingPolyline.getPath().forEach(latlng => bounds.extend(latlng)); hasThing = true; }
+        if (userMarker) { bounds.extend(userMarker.getPosition()); hasThing = true; }
+        if (accuracyCircle) { bounds.union(accuracyCircle.getBounds()); hasThing = true; }
+        if (hasThing) { ensureMap().fitBounds(bounds, 40); }
+      };
+
+      const updateMetrics = () => {
+        const fmt = (m) => (m >= 1000 ? (m/1000).toFixed(2)+ ' km' : Math.round(m) + ' m');
+        const routeLen = computePathLength(routePts);
+        const trackLen = computePathLength(trackingPts);
+        let remaining = '';
+        if (routePts.length && userMarker) {
+          const i = nearestRouteIndex(userMarker.getPosition(), routePts);
+          const remainingPts = routePts.slice(i);
+          remaining = ' | remaining ≈ ' + fmt(computePathLength(remainingPts));
+        }
+        metricsEl.textContent = `route: ${fmt(routeLen)} | traveled: ${fmt(trackLen)}${remaining}`;
+      };
+
+      // One-time GPS
+      btnLocate.addEventListener('click', () => {
+        if (!('geolocation' in navigator)) { statusEl.textContent = 'Geolocation not supported.'; return; }
+        statusEl.textContent = 'Requesting location…';
+        navigator.geolocation.getCurrentPosition((pos) => {
+          ensureMap();
+          handlePosition(pos, { once: true, follow: chkFollow.checked });
+          statusEl.textContent = 'Location found.';
+          fitAll();
+          updateMetrics();
+        }, (err) => statusEl.textContent = `GPS error: ${err.message}`,
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+      });
+
+      // Start live tracking
+      btnTrack.addEventListener('click', () => {
+        if (!('geolocation' in navigator)) { statusEl.textContent = 'Geolocation not supported.'; return; }
+        if (watchId != null) return; // already tracking
+        ensureMap();
+        statusEl.textContent = 'Starting live tracking…';
+        trackingPts = [];
+        if (trackingPolyline) { trackingPolyline.setMap(null); trackingPolyline = null; }
+        trackingPolyline = new google.maps.Polyline({ map: ensureMap(), path: [], strokeOpacity: 0.95, strokeWeight: 5 });
+        watchId = navigator.geolocation.watchPosition((pos) => {
+          handlePosition(pos, { once: false, follow: chkFollow.checked, record: true });
+          updateMetrics();
+        }, (err) => { statusEl.textContent = `Tracking error: ${err.message}`; }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 });
+        btnTrack.disabled = true; btnStop.disabled = false;
+      });
+
+      // Stop live tracking
+      btnStop.addEventListener('click', () => { stopTracking(statusEl, btnTrack, btnStop); });
+
+      // Auto-stop tracking if page is hidden (cost/ battery guard)
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden && watchId != null) { stopTracking(statusEl, btnTrack, btnStop); }
+      });
+
+      // Clear
+      btnClear.addEventListener('click', () => {
+        if (routePolyline) { routePolyline.setMap(null); routePolyline = null; }
+        if (trackingPolyline) { trackingPolyline.setMap(null); trackingPolyline = null; }
+        if (userMarker) { userMarker.setMap(null); userMarker = null; }
+        if (accuracyCircle) { accuracyCircle.setMap(null); accuracyCircle = null; }
+        routePts = []; trackingPts = [];
+        coordsEl.textContent = ''; metricsEl.textContent = '';
+        if (map) { map.setZoom(4); map.setCenter({ lat: 39.8283, lng: -98.5795 }); }
+        statusEl.textContent = 'Cleared.';
+        btnTrack.disabled = false; btnStop.disabled = true;
+      });
+
+      // GPX input
+      document.getElementById('gpx-file').addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (!/\.gpx$/i.test(file.name)) { statusEl.textContent = 'Please choose a .gpx file.'; return; }
+        statusEl.textContent = 'Reading GPX…';
+        try {
+          const text = await file.text();
+          routePts = parseGPX(text);
+          if (!routePts.length) { statusEl.textContent = 'No track/route points in this GPX.'; return; }
+          ensureMap();
+          if (routePolyline) routePolyline.setMap(null);
+          routePolyline = new google.maps.Polyline({ map: ensureMap(), path: routePts, strokeOpacity: 0.9, strokeWeight: 5 });
+          statusEl.textContent = 'Route loaded.';
+          fitAll();
+          updateMetrics();
+        } catch (err) {
+          console.error(err);
+          statusEl.textContent = 'Failed to read GPX file.';
+        }
+      });
+
+      function stopTracking(statusEl, btnTrack, btnStop) {
+        if (watchId != null) {
+          navigator.geolocation.clearWatch(watchId);
+          watchId = null;
+          statusEl.textContent = 'Tracking stopped.';
+          btnTrack.disabled = false; btnStop.disabled = true;
+        }
+      }
+
+      function handlePosition(pos, { once = false, follow = true, record = false } = {}) {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const here = new google.maps.LatLng(latitude, longitude);
+        document.getElementById('gm-coords').textContent = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)} m)`;
+
+        if (!userMarker) {
+          userMarker = new google.maps.Marker({ position: here, map: ensureMap(), title: 'You are here' });
+        } else {
+          userMarker.setPosition(here);
+        }
+        if (accuracyCircle) accuracyCircle.setMap(null);
+        accuracyCircle = new google.maps.Circle({ map: ensureMap(), center: here, radius: Math.max(accuracy, 20),
+          strokeColor: '#1a73e8', strokeOpacity: 0.5, strokeWeight: 1, fillColor: '#1a73e8', fillOpacity: 0.15 });
+
+        if (record) {
+          trackingPts.push(here);
+          if (!trackingPolyline) { trackingPolyline = new google.maps.Polyline({ map: ensureMap(), path: [], strokeOpacity: 0.95, strokeWeight: 5 }); }
+          trackingPolyline.getPath().push(here);
+        }
+
+        if (follow) { ensureMap().panTo(here); }
+        if (once) { ensureMap().setZoom(Math.max(ensureMap().getZoom(), 15)); }
       }
 
       function parseGPX(xmlText) {
         const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-        // Prefer track points <trkpt>, fallback to route points <rtept>
-        let pts = Array.from(doc.querySelectorAll('trkpt')).map(pt => [
+        let pts = Array.from(doc.querySelectorAll('trkpt')).map(pt => new google.maps.LatLng(
           parseFloat(pt.getAttribute('lat')),
-          parseFloat(pt.getAttribute('lon')),
-        ]);
-        if (pts.length === 0) {
-          pts = Array.from(doc.querySelectorAll('rtept')).map(pt => [
+          parseFloat(pt.getAttribute('lon'))
+        ));
+        if (!pts.length) {
+          pts = Array.from(doc.querySelectorAll('rtept')).map(pt => new google.maps.LatLng(
             parseFloat(pt.getAttribute('lat')),
-            parseFloat(pt.getAttribute('lon')),
-          ]);
+            parseFloat(pt.getAttribute('lon'))
+          ));
         }
-        // Filter bad values
-        pts = pts.filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
-        return pts;
+        return pts.filter(p => Number.isFinite(p.lat()) && Number.isFinite(p.lng()));
       }
 
-      function drawRoute(latlngs) {
-        const m = ensureMap();
-        if (polyline) { polyline.remove(); }
-        polyline = L.polyline(latlngs, { weight: 5, opacity: 0.9 });
-        polyline.addTo(m);
-        m.fitBounds(polyline.getBounds(), { padding: [20, 20] });
+      function computePathLength(latlngArr) {
+        if (!latlngArr || latlngArr.length < 2) return 0;
+        let d = 0;
+        for (let i = 1; i < latlngArr.length; i++) {
+          d += google.maps.geometry.spherical.computeDistanceBetween(latlngArr[i-1], latlngArr[i]);
+        }
+        return d; // meters
       }
 
-      fileInput.addEventListener('change', async (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        if (!/\.gpx$/i.test(file.name)) {
-          setStatus('Please select a .gpx file.');
-          return;
+      function nearestRouteIndex(point, arr) {
+        if (!arr || !arr.length) return 0;
+        let minD = Infinity, idx = 0;
+        for (let i = 0; i < arr.length; i++) {
+          const d = google.maps.geometry.spherical.computeDistanceBetween(point, arr[i]);
+          if (d < minD) { minD = d; idx = i; }
         }
-        setStatus('Reading GPX…');
-        try {
-          const text = await file.text();
-          const latlngs = parseGPX(text);
-          if (!latlngs.length) {
-            setStatus('No route points found in this GPX.');
-            return;
-          }
-          drawRoute(latlngs);
-          setStatus('Route loaded.');
-        } catch (err) {
-          console.error(err);
-          setStatus('Failed to read GPX file.');
-        }
-      });
-    })();
+        return idx;
+      }
+    }
   </script>
 </body>
 </html>
-
