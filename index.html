@@ -64,14 +64,26 @@
       transition: background-color 120ms ease;
     }
     button:hover, label:hover { background: var(--btn-bg-hover); }
-
     input[type="file"] { background: white; color: #333; font-weight: 500; }
-
     .row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 14px; }
 
     /* Google Map container */
     #gmap { width: min(92vw, 520px); height: clamp(300px, 50vh, 460px); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); margin-top: 12px; }
+
+    .legend{display:flex;justify-content:center;gap:12px;margin-top:8px;font-size:13px}
+    .chip{display:inline-block;width:22px;height:6px;border-radius:3px;vertical-align:middle}
+    .chip.route{background:#f59e0b}
+    .chip.track{background:#1a73e8}
+    .chip.monster{background:#e53935}
+
+    /* Caught overlay */
+    #caught-overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:9999}
+    #caught-overlay[hidden]{display:none}
+    .caught-panel{background:#fff;padding:24px 28px;border-radius:16px;box-shadow:var(--shadow);text-align:center;max-width:90vw}
+    .caught-panel h3{margin:0 0 8px 0}
+    .caught-panel p{margin:0 0 14px 0}
 
     details.cost-guard { text-align: left; margin-top: 10px; }
     details.cost-guard summary { cursor: pointer; font-weight: 700; }
@@ -85,10 +97,11 @@
     <button id="press" type="button">press me</button>
   </main>
 
-  <!-- Card 2: Google Map (unified: live GPS tracking + GPX route) -->
+  <!-- Card 2: Google Map (route + live tracking + monster) -->
   <section class="card" id="gmap-card" aria-live="polite">
     <h2>Map (Google) — Route + Live Tracking</h2>
-    <p id="map-status">Add your Google Maps API key in the script URL, then use GPS or import a .gpx route.</p>
+    <p id="map-status">Add your key (already done), then use GPS or import a .gpx route.</p>
+
     <div class="row">
       <button id="gm-locate" type="button" aria-describedby="map-status">One-time GPS</button>
       <button id="gm-track" type="button">Start Tracking</button>
@@ -100,18 +113,53 @@
       <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml" />
       <button id="gm-clear" type="button">Clear</button>
     </div>
+
     <p class="mono" id="gm-coords"></p>
+
+    <!-- Monster controls -->
+    <div class="row" id="monster-controls">
+      <button id="mon-start" type="button">Start Monster</button>
+      <button id="mon-stop" type="button" disabled>Stop Monster</button>
+      <label style="display:inline-flex;align-items:center;gap:6px;background:white;color:#222;padding:8px 12px;">
+        Lag (m)
+        <input id="mon-lag" type="number" min="10" step="5" value="50" style="width:80px;background:white;color:#222;font-weight:600"/>
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;background:white;color:#222;padding:8px 12px;">
+        <input id="buzz-toggle" type="checkbox" checked style="accent-color:#1a73e8;width:auto;height:auto;box-shadow:none;"/>
+        Buzz alert (<20 m)
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;background:white;color:#222;padding:8px 12px;">
+        <input id="snap-toggle" type="checkbox" style="accent-color:#1a73e8;width:auto;height:auto;box-shadow:none;"/>
+        Snap to route
+      </label>
+    </div>
+
     <p class="mono" id="gm-metrics"></p>
+    <p class="mono" id="monster-status"></p>
     <div id="gmap" aria-label="Interactive map"></div>
+
+    <div class="legend">
+      <span class="chip route"></span> Route &nbsp;&nbsp;
+      <span class="chip track"></span> Your trail &nbsp;&nbsp;
+      <span class="chip monster"></span> Monster
+    </div>
+
+    <div id="caught-overlay" hidden>
+      <div class="caught-panel">
+        <h3>You're caught!</h3>
+        <p>The monster closed the gap.</p>
+        <button id="caught-reset" type="button">OK</button>
+      </div>
+    </div>
 
     <details class="cost-guard">
       <summary>Cost guard (keep it free)</summary>
       <ul>
-        <li><strong>Lazy init:</strong> the map <em>does not load</em> until you click a button (so no tile load if you never use it).</li>
-        <li><strong>One map instance:</strong> we reuse a single map and avoid reloading the API.</li>
-        <li><strong>Only Maps JS + geometry:</strong> no Places/Routes/paid geolocation calls.</li>
-        <li><strong>Key restricted:</strong> lock your key to your Pages domain and the Maps JavaScript API only.</li>
-        <li><strong>Quotas & budgets:</strong> set tiny daily caps and a $0 budget alert in Google Cloud.</li>
+        <li><strong>Lazy init:</strong> the map loads only after first click.</li>
+        <li><strong>One map instance:</strong> we reuse a single map.</li>
+        <li><strong>Only Maps JS + geometry:</strong> no Places/Routes/paid geolocation.</li>
+        <li><strong>Key restricted:</strong> lock key to your Pages domain + Maps JS API only.</li>
+        <li><strong>Quotas & budgets:</strong> tiny daily caps + $0 budget alert.</li>
       </ul>
     </details>
   </section>
@@ -129,22 +177,21 @@
     })();
   </script>
 
-  <!-- Load Google Maps JS API (replace AIzaSyBmdlqxBZyGXL_0MgK6RHHD0-P-64UbCZ8). Include geometry library for distances. -->
+  <!-- Google Maps JS API -->
   <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBmdlqxBZyGXL_0MgK6RHHD0-P-64UbCZ8&v=weekly&libraries=geometry&callback=initMap"></script>
 
   <script>
-    // Card 2: One Google Map that supports current position, LIVE tracking, and GPX route polyline
-    // Cost guard: Lazy-init map only after first interaction; prevent duplicate init across hot reloads.
-    let map, userMarker, accuracyCircle, routePolyline, trackingPolyline, watchId = null;
-    let routePts = []; // GPX points
-    let trackingPts = []; // live points
+    // One Google Map: GPS + live tracking + GPX + Monster
+    // Cost guard: lazy-init map on first interaction; reuse one instance
+    let map, userMarker, accuracyCircle, routePolyline, trackingPolyline, watchId = null, monsterMarker, monsterActive = false, lastBuzzAt = 0, caughtShown = false;
+    let routePts = [];    // LatLng[] from GPX
+    let trackingPts = []; // LatLng[] of your live trail
 
     function ensureMap() {
       if (map) return map;
       const mapDiv = document.getElementById('gmap');
-      // Default center (continental US)
       map = new google.maps.Map(mapDiv, {
-        center: { lat: 39.8283, lng: -98.5795 },
+        center: { lat: 39.8283, lng: -98.5795 }, // US center
         zoom: 4,
         mapId: 'DEMO_MAP_ID'
       });
@@ -152,7 +199,7 @@
     }
 
     function initMap() {
-      if (window.__gmInitDone) return; // cost guard: avoid duplicate binding
+      if (window.__gmInitDone) return;
       window.__gmInitDone = true;
 
       const statusEl = document.getElementById('map-status');
@@ -160,19 +207,34 @@
       const metricsEl = document.getElementById('gm-metrics');
       const btnLocate = document.getElementById('gm-locate');
       const btnTrack = document.getElementById('gm-track');
-      const btnStop = document.getElementById('gm-stop');
+      const btnStop  = document.getElementById('gm-stop');
       const btnClear = document.getElementById('gm-clear');
       const chkFollow = document.getElementById('gm-follow');
 
-      // Let user know we won't load tiles until interaction
-      statusEl.textContent = 'Google Maps API ready — map will load after your first action.';
+      const monStart = document.getElementById('mon-start');
+      const monStop  = document.getElementById('mon-stop');
+      const lagInput = document.getElementById('mon-lag');
+      const monsterStatusEl = document.getElementById('monster-status');
+
+      const chkBuzz = document.getElementById('buzz-toggle');
+      const chkSnap = document.getElementById('snap-toggle');
+
+      const caughtOverlay = document.getElementById('caught-overlay');
+      const caughtReset = document.getElementById('caught-reset');
+
+      statusEl.textContent = 'Google Maps API ready — map loads after your first action.';
+
+      const BUZZ_THRESHOLD   = 20; // meters
+      const CAUGHT_THRESHOLD = 5;  // meters
+
+      caughtReset.addEventListener('click', () => { caughtOverlay.hidden = true; caughtShown = false; });
 
       const fitAll = () => {
-        if (!map) return; // nothing to fit yet
+        if (!map) return;
         const bounds = new google.maps.LatLngBounds();
         let hasThing = false;
-        if (routePolyline && routePolyline.getPath().getLength()) { routePolyline.getPath().forEach(latlng => bounds.extend(latlng)); hasThing = true; }
-        if (trackingPolyline && trackingPolyline.getPath().getLength()) { trackingPolyline.getPath().forEach(latlng => bounds.extend(latlng)); hasThing = true; }
+        if (routePolyline && routePolyline.getPath().getLength()) { routePolyline.getPath().forEach(ll => bounds.extend(ll)); hasThing = true; }
+        if (trackingPolyline && trackingPolyline.getPath().getLength()) { trackingPolyline.getPath().forEach(ll => bounds.extend(ll)); hasThing = true; }
         if (userMarker) { bounds.extend(userMarker.getPosition()); hasThing = true; }
         if (accuracyCircle) { bounds.union(accuracyCircle.getBounds()); hasThing = true; }
         if (hasThing) { ensureMap().fitBounds(bounds, 40); }
@@ -199,21 +261,19 @@
           ensureMap();
           handlePosition(pos, { once: true, follow: chkFollow.checked });
           statusEl.textContent = 'Location found.';
-          fitAll();
-          updateMetrics();
-        }, (err) => statusEl.textContent = `GPS error: ${err.message}`,
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+          fitAll(); updateMetrics();
+        }, (err) => statusEl.textContent = `GPS error: ${err.message}`, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
       });
 
       // Start live tracking
       btnTrack.addEventListener('click', () => {
         if (!('geolocation' in navigator)) { statusEl.textContent = 'Geolocation not supported.'; return; }
-        if (watchId != null) return; // already tracking
+        if (watchId != null) return;
         ensureMap();
         statusEl.textContent = 'Starting live tracking…';
         trackingPts = [];
         if (trackingPolyline) { trackingPolyline.setMap(null); trackingPolyline = null; }
-        trackingPolyline = new google.maps.Polyline({ map: ensureMap(), path: [], strokeOpacity: 0.95, strokeWeight: 5 });
+        trackingPolyline = new google.maps.Polyline({ map: ensureMap(), path: [], strokeOpacity: 0.95, strokeWeight: 5, strokeColor: '#1a73e8' });
         watchId = navigator.geolocation.watchPosition((pos) => {
           handlePosition(pos, { once: false, follow: chkFollow.checked, record: true });
           updateMetrics();
@@ -224,25 +284,48 @@
       // Stop live tracking
       btnStop.addEventListener('click', () => { stopTracking(statusEl, btnTrack, btnStop); });
 
-      // Auto-stop tracking if page is hidden (cost/ battery guard)
+      // Auto-stop tracking when tab hidden (cost/battery guard)
       document.addEventListener('visibilitychange', () => {
         if (document.hidden && watchId != null) { stopTracking(statusEl, btnTrack, btnStop); }
       });
 
-      // Clear
+      // Extra clear resets for monster/caught UI (in addition to map clears)
       btnClear.addEventListener('click', () => {
         if (routePolyline) { routePolyline.setMap(null); routePolyline = null; }
         if (trackingPolyline) { trackingPolyline.setMap(null); trackingPolyline = null; }
         if (userMarker) { userMarker.setMap(null); userMarker = null; }
         if (accuracyCircle) { accuracyCircle.setMap(null); accuracyCircle = null; }
+        if (monsterMarker) { monsterMarker.setMap(null); monsterMarker = null; }
+        monsterActive = false; caughtShown = false; caughtOverlay.hidden = true;
         routePts = []; trackingPts = [];
-        coordsEl.textContent = ''; metricsEl.textContent = '';
+        coordsEl.textContent = ''; metricsEl.textContent = ''; monsterStatusEl.textContent = '';
         if (map) { map.setZoom(4); map.setCenter({ lat: 39.8283, lng: -98.5795 }); }
         statusEl.textContent = 'Cleared.';
-        btnTrack.disabled = false; btnStop.disabled = true;
+        btnTrack.disabled = false; btnStop.disabled = true; monStart.disabled = false; monStop.disabled = true;
       });
 
-      // GPX input
+      // Monster controls
+      monStart.addEventListener('click', () => {
+        if (trackingPts.length < 2) { monsterStatusEl.textContent = 'Monster: start tracking and walk a bit first.'; return; }
+        monsterActive = true;
+        if (!monsterMarker) {
+          monsterMarker = new google.maps.Marker({
+            map: ensureMap(), position: trackingPts[0], title: 'Monster',
+            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 6, fillColor: '#e53935', fillOpacity: 1, strokeColor: '#b71c1c', strokeWeight: 2 }
+          });
+        }
+        updateMonster();
+        monStart.disabled = true; monStop.disabled = false;
+        statusEl.textContent = 'Monster started.';
+      });
+      monStop.addEventListener('click', () => {
+        monsterActive = false;
+        if (monsterMarker) { monsterMarker.setMap(null); monsterMarker = null; }
+        monsterStatusEl.textContent = 'Monster stopped.';
+        monStart.disabled = false; monStop.disabled = true;
+      });
+
+      // GPX input (optional route)
       document.getElementById('gpx-file').addEventListener('change', async (e) => {
         const file = e.target.files && e.target.files[0];
         if (!file) return;
@@ -254,10 +337,10 @@
           if (!routePts.length) { statusEl.textContent = 'No track/route points in this GPX.'; return; }
           ensureMap();
           if (routePolyline) routePolyline.setMap(null);
-          routePolyline = new google.maps.Polyline({ map: ensureMap(), path: routePts, strokeOpacity: 0.9, strokeWeight: 5 });
+          routePolyline = new google.maps.Polyline({ map: ensureMap(), path: routePts, strokeOpacity: 0.9, strokeWeight: 5, strokeColor: '#f59e0b' });
           statusEl.textContent = 'Route loaded.';
-          fitAll();
-          updateMetrics();
+          chkSnap.checked = true; // auto-enable snap when a route is present
+          fitAll(); updateMetrics();
         } catch (err) {
           console.error(err);
           statusEl.textContent = 'Failed to read GPX file.';
@@ -276,42 +359,69 @@
       function handlePosition(pos, { once = false, follow = true, record = false } = {}) {
         const { latitude, longitude, accuracy } = pos.coords;
         const here = new google.maps.LatLng(latitude, longitude);
-        document.getElementById('gm-coords').textContent = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)} m)`;
+        coordsEl.textContent = `${latitude.toFixed(6)}, ${longitude.toFixed(6)} (±${Math.round(accuracy)} m)`;
 
-        if (!userMarker) {
-          userMarker = new google.maps.Marker({ position: here, map: ensureMap(), title: 'You are here' });
-        } else {
-          userMarker.setPosition(here);
-        }
+        if (!userMarker) { userMarker = new google.maps.Marker({ position: here, map: ensureMap(), title: 'You are here' }); }
+        else { userMarker.setPosition(here); }
+
         if (accuracyCircle) accuracyCircle.setMap(null);
-        accuracyCircle = new google.maps.Circle({ map: ensureMap(), center: here, radius: Math.max(accuracy, 20),
-          strokeColor: '#1a73e8', strokeOpacity: 0.5, strokeWeight: 1, fillColor: '#1a73e8', fillOpacity: 0.15 });
+        accuracyCircle = new google.maps.Circle({
+          map: ensureMap(), center: here, radius: Math.max(accuracy, 20),
+          strokeColor: '#1a73e8', strokeOpacity: 0.5, strokeWeight: 1, fillColor: '#1a73e8', fillOpacity: 0.15
+        });
 
         if (record) {
-          trackingPts.push(here);
-          if (!trackingPolyline) { trackingPolyline = new google.maps.Polyline({ map: ensureMap(), path: [], strokeOpacity: 0.95, strokeWeight: 5 }); }
-          trackingPolyline.getPath().push(here);
+          const toPush = (chkSnap.checked && routePts.length > 1) ? nearestPointOnPolyline(here, routePts) : here;
+          trackingPts.push(toPush);
+          if (!trackingPolyline) { trackingPolyline = new google.maps.Polyline({ map: ensureMap(), path: [], strokeOpacity: 0.95, strokeWeight: 5, strokeColor: '#1a73e8' }); }
+          trackingPolyline.getPath().push(toPush);
         }
 
+        if (monsterActive) { updateMonster(); }
         if (follow) { ensureMap().panTo(here); }
         if (once) { ensureMap().setZoom(Math.max(ensureMap().getZoom(), 15)); }
       }
 
-      function parseGPX(xmlText) {
-        const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-        let pts = Array.from(doc.querySelectorAll('trkpt')).map(pt => new google.maps.LatLng(
-          parseFloat(pt.getAttribute('lat')),
-          parseFloat(pt.getAttribute('lon'))
-        ));
-        if (!pts.length) {
-          pts = Array.from(doc.querySelectorAll('rtept')).map(pt => new google.maps.LatLng(
-            parseFloat(pt.getAttribute('lat')),
-            parseFloat(pt.getAttribute('lon'))
-          ));
+      function updateMonster() {
+        if (!monsterActive || trackingPts.length < 2) { monsterStatusEl.textContent = 'Monster: waiting…'; return; }
+        const lag = Math.max(10, parseFloat(lagInput.value) || 50);
+        const total = computePathLength(trackingPts);
+        const target = Math.max(0, total - lag);
+        const pos = pointAlongPath(trackingPts, target);
+        if (!pos) { monsterStatusEl.textContent = 'Monster: waiting…'; return; }
+
+        if (!monsterMarker) {
+          monsterMarker = new google.maps.Marker({
+            map: ensureMap(), position: pos, title: 'Monster',
+            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 6, fillColor: '#e53935', fillOpacity: 1, strokeColor: '#b71c1c', strokeWeight: 2 }
+          });
+        } else {
+          monsterMarker.setPosition(pos);
         }
-        return pts.filter(p => Number.isFinite(p.lat()) && Number.isFinite(p.lng()));
+
+        if (userMarker) {
+          const gap = google.maps.geometry.spherical.computeDistanceBetween(userMarker.getPosition(), pos);
+          monsterStatusEl.textContent = `Monster gap: ${gap >= 1000 ? (gap/1000).toFixed(2)+' km' : Math.round(gap)+' m'}`;
+
+          // Buzz alert (throttled)
+          const now = Date.now();
+          if (chkBuzz.checked && gap < BUZZ_THRESHOLD && now - lastBuzzAt > 2000 && 'vibrate' in navigator) {
+            navigator.vibrate([150, 80, 150]);
+            lastBuzzAt = now;
+          }
+          // Caught!
+          if (!caughtShown && gap < CAUGHT_THRESHOLD) {
+            caughtShown = true;
+            caughtOverlay.hidden = false;
+            stopTracking(statusEl, btnTrack, btnStop);
+            monsterActive = false; monStart.disabled = false; monStop.disabled = true;
+          }
+        } else {
+          monsterStatusEl.textContent = 'Monster is following your trail.';
+        }
       }
 
+      // ---- Geometry helpers ----
       function computePathLength(latlngArr) {
         if (!latlngArr || latlngArr.length < 2) return 0;
         let d = 0;
@@ -329,6 +439,45 @@
           if (d < minD) { minD = d; idx = i; }
         }
         return idx;
+      }
+
+      // Nearest point ON a polyline to 'point' (planar approx; good for short segments)
+      function nearestPointOnPolyline(point, arr) {
+        let best = null, bestD = Infinity;
+        const lat0 = point.lat();
+        const k = Math.cos(lat0 * Math.PI/180);
+        const P = { x: point.lng()*k, y: point.lat() };
+        for (let i=1;i<arr.length;i++) {
+          const A = { x: arr[i-1].lng()*k, y: arr[i-1].lat() };
+          const B = { x: arr[i].lng()*k, y: arr[i].lat() };
+          const AB = { x: B.x - A.x, y: B.y - A.y };
+          const AP = { x: P.x - A.x, y: P.y - A.y };
+          const ab2 = AB.x*AB.x + AB.y*AB.y;
+          if (ab2 === 0) continue;
+          let t = (AP.x*AB.x + AP.y*AB.y) / ab2; // projection factor
+          t = Math.max(0, Math.min(1, t));
+          const Q = { x: A.x + t*AB.x, y: A.y + t*AB.y };
+          const d = Math.hypot(P.x - Q.x, P.y - Q.y);
+          if (d < bestD) { bestD = d; best = new google.maps.LatLng(Q.y, Q.x / k); }
+        }
+        return best || arr[0];
+      }
+
+      // Coordinate along path at target distance from start
+      function pointAlongPath(latlngArr, targetDist) {
+        if (!latlngArr || latlngArr.length === 0) return null;
+        if (targetDist <= 0) return latlngArr[0];
+        let traveled = 0;
+        for (let i = 1; i < latlngArr.length; i++) {
+          const a = latlngArr[i-1], b = latlngArr[i];
+          const seg = google.maps.geometry.spherical.computeDistanceBetween(a, b);
+          if (traveled + seg >= targetDist) {
+            const f = (targetDist - traveled) / seg;
+            return google.maps.geometry.spherical.interpolate(a, b, Math.min(Math.max(f, 0), 1));
+          }
+          traveled += seg;
+        }
+        return latlngArr[latlngArr.length - 1];
       }
     }
   </script>
